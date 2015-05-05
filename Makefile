@@ -1,8 +1,9 @@
-WEB_CONTAINERS = web_a web_b web_c web_d
+WEB_CONTAINERS = web-a web-b web-c web-d
 LB_CONTAINERS = lb1 lb2 lb3 lb4 lb5 lb6
 SLEEP_TIME = 3
+SLEEP_TIME_IN_TUTUM = 60
 
-test:test-unittest test-without-tutum test-with-tutum ;
+test:test-unittest test-with-tutum ;
 
 test-docker-available:
 	@set -e
@@ -18,6 +19,7 @@ clean:test-docker-available
 	@echo
 
 create-cert:clean
+	@set -e
 	@echo "==> Generating certificate for tests"
 	openssl req -x509 -newkey rsa:2048 -keyout key.pem -out ca.pem -days 1080 -nodes -subj '/CN=localhost/O=My Company Name LTD./C=US'
 	cp key.pem cert.pem
@@ -35,54 +37,75 @@ test-without-tutum:build
 	@set -e
 	@echo "====== Running integration tests with Tutum ======"
 	@echo "==> Running testing containers"
-	docker run -d --name web_a -e HOSTNAME="web_a" tutum/hello-world
-	docker run -d --name web_b -e HOSTNAME="web_b" tutum/hello-world
-	docker run -d --name web_c -e HOSTNAME=web_c -e VIRTUAL_HOST=web_c.org tutum/hello-world
-	docker run -d --name web_d -e HOSTNAME=web_d -e VIRTUAL_HOST="web_d.org, test.org" tutum/hello-world
+	docker run -d --name web-a -e HOSTNAME="web-a" tutum/hello-world
+	docker run -d --name web-b -e HOSTNAME="web-b" tutum/hello-world
+	docker run -d --name web-c -e HOSTNAME=web-c -e VIRTUAL_HOST=web-c.org tutum/hello-world
+	docker run -d --name web-d -e HOSTNAME=web-d -e VIRTUAL_HOST="web-d.org, test.org" tutum/hello-world
 	@echo
 
 	@echo "==> Testing if haproxy is running properly"
-	docker run -d --name lb1 --link web_a:web_a --link web_b:web_b -p 8000:80 haproxy
+	docker run -d --name lb1 --link web-a:web-a --link web-b:web-b -p 8000:80 haproxy
 	sleep $(SLEEP_TIME)
 	curl --retry 10 --retry-delay 5 -L -I http://localhost:8000 | grep "200 OK"
 	@echo
 
 	@echo "==> Testing virtual host - specified in haproxy cotnainer"
-	docker run -d --name lb2 --link web_a:web_a --link web_b:web_b -e VIRTUAL_HOST=" web_a = www.web_a.org, www.test.org, web_b = www.web_b.org " -p 8001:80 haproxy
+	docker run -d --name lb2 --link web-a:web-a --link web-b:web-b -e VIRTUAL_HOST=" web-a = www.web-a.org, www.test.org, web-b = www.web-b.org " -p 8001:80 haproxy
 	sleep $(SLEEP_TIME)
-	curl --retry 10 --retry-delay 5 -H 'Host:www.web_a.org' 127.0.0.1:8001 | grep 'My hostname is web_a'
-	curl --retry 10 --retry-delay 5 -H 'Host:www.test.org' 127.0.0.1:8001 | grep 'My hostname is web_a'
-	curl --retry 10 --retry-delay 5 -H 'Host:www.web_b.org' 127.0.0.1:8001 | grep 'My hostname is web_b'
+	curl --retry 10 --retry-delay 5 -H 'Host:www.web-a.org' 127.0.0.1:8001 | grep 'My hostname is web-a'
+	curl --retry 10 --retry-delay 5 -H 'Host:www.test.org' 127.0.0.1:8001 | grep 'My hostname is web-a'
+	curl --retry 10 --retry-delay 5 -H 'Host:www.web-b.org' 127.0.0.1:8001 | grep 'My hostname is web-b'
 	@echo
 
 	@echo "==> Testing virtual host - specified in linked containers"
-	docker run -d --name lb3 --link web_c:web_c --link web_d:web_d -p 8002:80 haproxy
+	docker run -d --name lb3 --link web-c:web-c --link web-d:web-d -p 8002:80 haproxy
 	sleep $(SLEEP_TIME)
-	curl --retry 10 --retry-delay 5 -H 'Host:web_c.org' 127.0.0.1:8002 | grep 'My hostname is web_c'
-	curl --retry 10 --retry-delay 5 -H 'Host:test.org' 127.0.0.1:8002 | grep 'My hostname is web_d'
-	curl --retry 10 --retry-delay 5 -H 'Host:web_d.org' 127.0.0.1:8002 | grep 'My hostname is web_d'
+	curl --retry 10 --retry-delay 5 -H 'Host:web-c.org' 127.0.0.1:8002 | grep 'My hostname is web-c'
+	curl --retry 10 --retry-delay 5 -H 'Host:test.org' 127.0.0.1:8002 | grep 'My hostname is web-d'
+	curl --retry 10 --retry-delay 5 -H 'Host:web-d.org' 127.0.0.1:8002 | grep 'My hostname is web-d'
 	@echo
 
 	@echo "==> Testing SSL settings"
-	docker run -d --name lb4 --link web_a:web_a -e SSL_CERT="$(certs)" -p 443:443 haproxy
+	docker run -d --name lb4 --link web-a:web-a -e SSL_CERT="$(certs)" -p 443:443 haproxy
 	sleep $(SLEEP_TIME)
-	curl --retry 10 --retry-delay 5 --cacert ca.pem -L https://localhost | grep 'My hostname is web_a'
+	curl --retry 10 --retry-delay 5 --cacert ca.pem -L https://localhost | grep 'My hostname is web-a'
 	@echo
 
 	@echo "==> Testing wildcard sub-domains on virtual host (HDR=hdr_end)"
-	docker run -d --name lb5 --link web_c:web_c -e HDR="hdr_end" -p 8003:80 haproxy
+	docker run -d --name lb5 --link web-c:web-c -e HDR="hdr_end" -p 8003:80 haproxy
 	sleep $(SLEEP_TIME)
-	curl --retry 10 --retry-delay 5 -H 'Host:www.web_c.org' 127.0.0.1:8003 | grep 'My hostname is web_c'
-	@echo
-
-	@echo "==> Testing virtual host with \"-\" in the link alias"
-	docker run -d --name lb6 --link web_a:web-a -e VIRTUAL_HOST="web-a=web-a.org" -p 8004:80 haproxy
-	sleep $(SLEEP_TIME)
-	curl --retry 10 --retry-delay 5 -H 'Host:web-a.org' 127.0.0.1:8004 | grep 'My hostname is web_a'
+	curl --retry 10 --retry-delay 5 -H 'Host:www.web-c.org' 127.0.0.1:8003 | grep 'My hostname is web-c'
 	@echo
 
 test-with-tutum:build
+	@set -e
 	@echo "====== Running integration tests with Tutum ======"
+	@echo "==> Terminating containers in Tuttum"
+	tutum service terminate $(WEB_CONTAINERS) $(LB_CONTAINERS) > /dev/null 2>&1 || true
+	@echo
+
+	@echo "=> Pushing the image to tifayuki/haproxy"
+	docker login -u $(DOCKER_USER) -p $(DOCKER_PASS) -e a@a.com
+	docker tag haproxy tifayuki/haproxy
+	docker push tifayuki/haproxy
+	@echo
+
+	@echo "=> Pulling the images"
+	tutum service terminate pre1 pre2 > /dev/null 2>&1 || true
+	sleep $(SLEEP_TIME_IN_TUTUM)
+	tutum service run --name pre1 tutum/hello-world
+	tutum service run --name pre2 tifayuki/haproxy
+	sleep $(SLEEP_TIME_IN_TUTUM)
+	tutum service terminate pre1 pre2 > /dev/null 2>&1 || true
+
+	@echo "==> Testing if haproxy is running properly"
+	tutum service run --name web-a -e HOSTNAME="web-a" tutum/hello-world
+	tutum service run --name web-b -e HOSTNAME="web-b" tutum/hello-world
+	sleep $(SLEEP_TIME_IN_TUTUM)
+	tutum service run --name lb1 --link web-a:web-a --link web-b:web-b -p 8000:80 tifayuki/haproxy
+	sleep $(SLEEP_TIME_IN_TUTUM)
+	curl --retry 10 --retry-delay 5 -L -I http://302a494c-tifayuki.node.tutum.io:8000 | grep "200 OK"
+	tutum service terminate
 	@echo
 
 test-unittest:build
